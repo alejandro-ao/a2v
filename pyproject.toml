@@ -1,0 +1,20 @@
+[project]
+name = "audio-to-video"
+version = "0.1.0"
+description = "Audio-reactive MP4 generator with multiple visual presets."
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = [
+    "numpy>=2.0.0",
+    "pillow>=10.0.0",
+]
+
+[project.scripts]
+a2v = "audio_to_video.cli:main"
+
+[build-system]
+requires = ["hatchling>=1.26.0"]
+build-backend = "hatchling.build"
+
+[tool.uv]
+package = true
