@@ -1,10 +1,17 @@
 from __future__ import annotations
 
 import re
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 
 LRC_TIMESTAMP = re.compile(r"\[(\d+):(\d+(?:\.\d+)?)\]")
+
+
+@dataclass
+class LyricWord:
+    start: float
+    end: float
+    text: str
 
 
 @dataclass
@@ -12,6 +19,7 @@ class LyricLine:
     start: float
     end: float
     text: str
+    words: list[LyricWord] = field(default_factory=list)
 
 
 def parse_lrc(path: Path, duration: float) -> list[LyricLine]:
@@ -56,4 +64,3 @@ def active_lyric_index(lines: list[LyricLine], t: float) -> int | None:
     if t >= lines[-1].end:
         return len(lines) - 1
     return None
-

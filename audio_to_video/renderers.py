@@ -261,17 +261,11 @@ class KineticLyricsRenderer(BaseRenderer):
             return
 
         line = self.lyrics[index]
-        words = line.text.split()
+        words, progresses = self._word_progress(line, t)
         if not words:
             return
 
-        duration = max(line.end - line.start, 0.25)
-        progress = float(np.clip((t - line.start) / duration, 0.0, 1.0))
-        highlight = progress * len(words)
-        active_word = min(len(words) - 1, int(highlight))
-        active_fraction = highlight - active_word
-
-        layout = self._layout_words(line.text)
+        layout = self._layout_words(words)
         line_height = int(getattr(self.font_main, "size", 48) * 1.3)
         y_base = int(self.config.height * 0.34)
 
@@ -288,10 +282,11 @@ class KineticLyricsRenderer(BaseRenderer):
                 rgba = (214, 222, 238, 185)
                 wobble_y = 0
 
-                if word_idx < active_word:
+                word_progress = progresses[word_idx]
+                if word_progress >= 1.0:
                     rgba = (255, 247, 201, 255)
-                elif word_idx == active_word:
-                    pulse = np.sin(active_fraction * np.pi)
+                elif word_progress > 0.0:
+                    pulse = np.sin(word_progress * np.pi)
                     intensity = int(210 + 45 * pulse + (95 * min(beat * 8.0, 1.0)))
                     rgba = (255, intensity, 180, 255)
                     wobble_y = -int(12 * pulse)
@@ -308,12 +303,12 @@ class KineticLyricsRenderer(BaseRenderer):
             y = int(self.config.height * 0.86)
             draw.text((x, y), next_line, font=self.font_small, fill=(188, 198, 215, 145))
 
-    def _layout_words(self, text: str) -> list[list[tuple[str, int, int]]]:
-        cached = self.layout_cache.get(text)
+    def _layout_words(self, words: list[str]) -> list[list[tuple[str, int, int]]]:
+        cache_key = "|||".join(words)
+        cached = self.layout_cache.get(cache_key)
         if cached is not None:
             return cached
 
-        words = text.split()
         max_width = int(self.config.width * 0.86)
         self.space_w = self._text_width(" ", self.font_main)
 
@@ -338,8 +333,26 @@ class KineticLyricsRenderer(BaseRenderer):
         if row:
             rows.append(row)
 
-        self.layout_cache[text] = rows
+        self.layout_cache[cache_key] = rows
         return rows
+
+    def _word_progress(self, line: LyricLine, t: float) -> tuple[list[str], list[float]]:
+        if line.words:
+            words = [word.text for word in line.words]
+            progresses: list[float] = []
+            for word in line.words:
+                duration = max(word.end - word.start, 0.05)
+                progress = float(np.clip((t - word.start) / duration, 0.0, 1.0))
+                progresses.append(progress)
+            return words, progresses
+
+        words = line.text.split()
+        if not words:
+            return [], []
+        duration = max(line.end - line.start, 0.25)
+        highlight = float(np.clip((t - line.start) / duration, 0.0, 1.0)) * len(words)
+        progresses = [float(np.clip(highlight - i, 0.0, 1.0)) for i in range(len(words))]
+        return words, progresses
 
     def _text_width(self, text: str, font: ImageFont.ImageFont) -> int:
         bbox = self.measure_draw.textbbox((0, 0), text, font=font)

@@ -5,6 +5,7 @@ description = "Audio-reactive MP4 generator with multiple visual presets."
 readme = "README.md"
 requires-python = ">=3.11"
 dependencies = [
+    "faster-whisper>=1.2.0",
     "numpy>=2.0.0",
     "pillow>=10.0.0",
     "typer>=0.16.0",

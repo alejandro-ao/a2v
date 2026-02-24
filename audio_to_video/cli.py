@@ -10,6 +10,7 @@ import typer
 from .audio import decode_audio_mono, require_binary
 from .lyrics import parse_lrc
 from .renderers import PRESET_KINETIC_LYRICS, PRESETS, RenderConfig, create_renderer
+from .transcription import transcribe_with_whisper
 
 app = typer.Typer(
     name="a2v",
@@ -33,7 +34,7 @@ def cmd_render(
     lyrics: Path | None = typer.Option(
         None,
         "--lyrics",
-        help="Path to .lrc lyrics file (required for kinetic-lyrics).",
+        help="Optional path to .lrc lyrics/captions file for kinetic-lyrics.",
     ),
     font: Path | None = typer.Option(
         None,
@@ -47,6 +48,31 @@ def cmd_render(
         22_050,
         "--sample-rate",
         help="Audio sample rate used for analysis.",
+    ),
+    transcribe: bool = typer.Option(
+        True,
+        "--transcribe/--no-transcribe",
+        help="Auto-generate timed captions with Whisper when no --lyrics file is provided.",
+    ),
+    whisper_model: str = typer.Option(
+        "small",
+        "--whisper-model",
+        help="Whisper model size/name used when --transcribe is enabled (e.g. tiny, base, small).",
+    ),
+    whisper_language: str | None = typer.Option(
+        None,
+        "--whisper-language",
+        help="Optional language hint (ISO code like 'en', 'es').",
+    ),
+    whisper_device: str = typer.Option(
+        "auto",
+        "--whisper-device",
+        help="Whisper device: auto, cpu, or cuda.",
+    ),
+    whisper_compute_type: str = typer.Option(
+        "default",
+        "--whisper-compute-type",
+        help="Whisper compute type (e.g. default, int8, float16).",
     ),
     overwrite: bool = typer.Option(
         False,
@@ -77,13 +103,33 @@ def cmd_render(
 
     parsed_lyrics = None
     if preset == PRESET_KINETIC_LYRICS:
-        if lyrics is None:
-            raise typer.BadParameter("--lyrics is required for preset 'kinetic-lyrics'.")
-        if not lyrics.exists():
-            raise typer.BadParameter(f"Lyrics file not found: {lyrics}")
-        parsed_lyrics = parse_lrc(lyrics, audio.duration)
-        if not parsed_lyrics:
-            raise typer.BadParameter(f"No timed lines found in LRC file: {lyrics}")
+        if lyrics is not None:
+            if not lyrics.exists():
+                raise typer.BadParameter(f"Lyrics file not found: {lyrics}")
+            parsed_lyrics = parse_lrc(lyrics, audio.duration)
+            if not parsed_lyrics:
+                raise typer.BadParameter(f"No timed lines found in LRC file: {lyrics}")
+        elif transcribe:
+            print(
+                f"Transcribing captions with Whisper model '{whisper_model}'...",
+                file=sys.stderr,
+            )
+            parsed_lyrics = transcribe_with_whisper(
+                audio_path=input_audio,
+                model_name=whisper_model,
+                language=whisper_language,
+                device=whisper_device,
+                compute_type=whisper_compute_type,
+            )
+            if not parsed_lyrics:
+                raise typer.BadParameter(
+                    "Whisper did not produce caption lines. Try another model or provide --lyrics."
+                )
+            print(f"Generated {len(parsed_lyrics)} caption lines.", file=sys.stderr)
+        else:
+            raise typer.BadParameter(
+                "For preset 'kinetic-lyrics', pass --lyrics or enable --transcribe."
+            )
 
     config = RenderConfig(
         width=width,
