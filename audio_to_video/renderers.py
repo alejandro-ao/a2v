@@ -175,7 +175,6 @@ class KineticLyricsRenderer(BaseRenderer):
     points: int = 700
     window_size: int = 4096
     bg_cache: np.ndarray | None = None
-    prev_energy: float = 0.0
 
     def __post_init__(self) -> None:
         self.bg_cache = gradient_bg(
@@ -192,53 +191,23 @@ class KineticLyricsRenderer(BaseRenderer):
         )
         self.measure_canvas = Image.new("RGB", (32, 32))
         self.measure_draw = ImageDraw.Draw(self.measure_canvas)
-        self.layout_cache: dict[str, list[list[tuple[str, int, int]]]] = {}
+        self.layout_cache: dict[str, list[list[tuple[str, int, int, int]]]] = {}
         self.font_main = load_font(74, self.font_path)
         self.font_small = load_font(40, self.font_path)
 
     def render_frame(self, t: float) -> np.ndarray:
         wave = self._wave_points(t)
         energy = self._rms(wave)
-        beat = max(0.0, energy - self.prev_energy)
-        self.prev_energy = (0.86 * self.prev_energy) + (0.14 * energy)
-
-        bands = self._frequency_bands(t, 20)
         color_a = np.array(self.config.primary_color, dtype=np.float32)
-        color_b = np.array(self.config.secondary_color, dtype=np.float32)
 
         assert self.bg_cache is not None
         image = Image.fromarray(self.bg_cache.copy(), mode="RGB").convert("RGBA")
         draw = ImageDraw.Draw(image, "RGBA")
 
-        self._draw_side_bars(draw, bands, color_a, color_b)
         self._draw_floor_wave(draw, wave, energy, color_a)
-        self._draw_lyrics(draw, t, beat)
+        self._draw_lyrics(draw, t)
 
         return np.asarray(image.convert("RGB"), dtype=np.uint8)
-
-    def _draw_side_bars(
-        self,
-        draw: ImageDraw.ImageDraw,
-        bands: np.ndarray,
-        color_a: np.ndarray,
-        color_b: np.ndarray,
-    ) -> None:
-        h = self.config.height
-        for i, val in enumerate(bands):
-            strength = float(np.clip(val * 8.0, 0.0, 1.0))
-            bar_h = int((h * 0.52) * strength)
-            mix = i / max(len(bands) - 1, 1)
-            color = ((1.0 - mix) * color_a) + (mix * color_b)
-            fill = (int(color[0]), int(color[1]), int(color[2]), int(55 + 180 * strength))
-
-            width = 8 + int(5 * strength)
-            gap = 10
-            x_left = 40 + i * (width + gap)
-            x_right = self.config.width - x_left
-            y0 = h - 34
-            y1 = y0 - bar_h
-            draw.rectangle((x_left, y1, x_left + width, y0), fill=fill)
-            draw.rectangle((x_right - width, y1, x_right, y0), fill=fill)
 
     def _draw_floor_wave(
         self,
@@ -255,7 +224,7 @@ class KineticLyricsRenderer(BaseRenderer):
         draw.line(points, fill=(rgb[0], rgb[1], rgb[2], alpha // 3), width=14)
         draw.line(points, fill=(rgb[0], rgb[1], rgb[2], alpha), width=4)
 
-    def _draw_lyrics(self, draw: ImageDraw.ImageDraw, t: float, beat: float) -> None:
+    def _draw_lyrics(self, draw: ImageDraw.ImageDraw, t: float) -> None:
         index = active_lyric_index(self.lyrics, t)
         if index is None:
             return
@@ -271,39 +240,48 @@ class KineticLyricsRenderer(BaseRenderer):
 
         for row_idx, row in enumerate(layout):
             total_w = 0
-            for j, (_, _, width) in enumerate(row):
+            for j, (_, _, width, _) in enumerate(row):
                 total_w += width
                 if j != len(row) - 1:
                     total_w += self.space_w
 
             x = (self.config.width - total_w) // 2
             y = y_base + (row_idx * line_height)
-            for word, word_idx, width in row:
-                rgba = (214, 222, 238, 185)
-                wobble_y = 0
-
+            for word, word_idx, width, height in row:
+                text_color = (214, 222, 238, 185)
                 word_progress = progresses[word_idx]
-                if word_progress >= 1.0:
-                    rgba = (255, 247, 201, 255)
-                elif word_progress > 0.0:
-                    pulse = np.sin(word_progress * np.pi)
-                    intensity = int(210 + 45 * pulse + (95 * min(beat * 8.0, 1.0)))
-                    rgba = (255, intensity, 180, 255)
-                    wobble_y = -int(12 * pulse)
 
-                draw.text((x + 3, y + 4 + wobble_y), word, font=self.font_main, fill=(0, 0, 0, 140))
-                draw.text((x, y + wobble_y), word, font=self.font_main, fill=rgba)
+                if word_progress >= 1.0:
+                    text_color = (255, 246, 218, 255)
+                elif word_progress > 0.0:
+                    pad_x = 12
+                    pad_y = 8
+                    left = x - pad_x
+                    top = y - pad_y
+                    right = x + width + pad_x
+                    bottom = y + height + pad_y
+                    radius = int((height + (2 * pad_y)) * 0.42)
+
+                    draw.rounded_rectangle(
+                        (left, top, right, bottom),
+                        radius=radius,
+                        fill=(255, 190, 132, 54),
+                    )
+
+                    fill_right = left + int((right - left) * float(np.clip(word_progress, 0.0, 1.0)))
+                    if fill_right > left + 2:
+                        draw.rounded_rectangle(
+                            (left, top, fill_right, bottom),
+                            radius=radius,
+                            fill=(255, 170, 96, 125),
+                        )
+                    text_color = (255, 248, 232, 255)
+
+                draw.text((x + 2, y + 3), word, font=self.font_main, fill=(0, 0, 0, 120))
+                draw.text((x, y), word, font=self.font_main, fill=text_color)
                 x += width + self.space_w
 
-        if index + 1 < len(self.lyrics):
-            next_line = self.lyrics[index + 1].text
-            bbox = draw.textbbox((0, 0), next_line, font=self.font_small)
-            w = bbox[2] - bbox[0]
-            x = (self.config.width - w) // 2
-            y = int(self.config.height * 0.86)
-            draw.text((x, y), next_line, font=self.font_small, fill=(188, 198, 215, 145))
-
-    def _layout_words(self, words: list[str]) -> list[list[tuple[str, int, int]]]:
+    def _layout_words(self, words: list[str]) -> list[list[tuple[str, int, int, int]]]:
         cache_key = "|||".join(words)
         cached = self.layout_cache.get(cache_key)
         if cached is not None:
@@ -312,23 +290,23 @@ class KineticLyricsRenderer(BaseRenderer):
         max_width = int(self.config.width * 0.86)
         self.space_w = self._text_width(" ", self.font_main)
 
-        rows: list[list[tuple[str, int, int]]] = []
-        row: list[tuple[str, int, int]] = []
+        rows: list[list[tuple[str, int, int, int]]] = []
+        row: list[tuple[str, int, int, int]] = []
         row_w = 0
 
         for idx, word in enumerate(words):
-            word_w = self._text_width(word, self.font_main)
+            word_w, word_h = self._text_size(word, self.font_main)
             required = word_w if not row else row_w + self.space_w + word_w
             if row and required > max_width:
                 rows.append(row)
-                row = [(word, idx, word_w)]
+                row = [(word, idx, word_w, word_h)]
                 row_w = word_w
             else:
                 if row:
                     row_w += self.space_w + word_w
                 else:
                     row_w = word_w
-                row.append((word, idx, word_w))
+                row.append((word, idx, word_w, word_h))
 
         if row:
             rows.append(row)
@@ -358,6 +336,10 @@ class KineticLyricsRenderer(BaseRenderer):
         bbox = self.measure_draw.textbbox((0, 0), text, font=font)
         return int(bbox[2] - bbox[0])
 
+    def _text_size(self, text: str, font: ImageFont.ImageFont) -> tuple[int, int]:
+        bbox = self.measure_draw.textbbox((0, 0), text, font=font)
+        return int(bbox[2] - bbox[0]), int(bbox[3] - bbox[1])
+
     def _wave_points(self, t: float) -> np.ndarray:
         chunk = segment_around_time(
             self.audio.samples,
@@ -368,23 +350,6 @@ class KineticLyricsRenderer(BaseRenderer):
         src = np.linspace(0, self.window_size - 1, self.window_size, dtype=np.float32)
         dst = np.linspace(0, self.window_size - 1, self.points, dtype=np.float32)
         return np.interp(dst, src, chunk).astype(np.float32)
-
-    def _frequency_bands(self, t: float, bands: int) -> np.ndarray:
-        chunk = segment_around_time(
-            self.audio.samples,
-            self.audio.sample_rate,
-            t,
-            self.window_size,
-        )
-        windowed = chunk * np.hanning(len(chunk))
-        spectrum = np.abs(np.fft.rfft(windowed))
-        if np.max(spectrum) <= 1e-8:
-            return np.zeros(bands, dtype=np.float32)
-
-        bins = np.array_split(spectrum, bands)
-        values = np.array([float(np.mean(part)) for part in bins], dtype=np.float32)
-        values /= float(np.max(values))
-        return values
 
     @staticmethod
     def _rms(values: np.ndarray) -> float:

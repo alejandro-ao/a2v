@@ -11,3 +11,9 @@ wheels/
 
 # Generated media outputs
 *.mp4
+
+# Local preview fixtures
+samples/*.m4a
+samples/*.mp3
+samples/*.wav
+samples/*.lrc

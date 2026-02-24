@@ -63,6 +63,28 @@ Common options:
 - `--whisper-device auto|cpu|cuda`
 - `--whisper-compute-type default|int8|float16|...`
 
+## Fast visual iteration (recommended)
+
+Use the quick preview script to render only a short slice of a long audio file.
+This avoids re-transcribing/re-rendering the full file every time you tweak visuals.
+
+```bash
+scripts/quick-preview.sh \
+  -i /Users/alejandro/Downloads/The_Hidden_Grammar_of_Woof_PDF.m4a \
+  -s 00:02:10 \
+  -d 10 \
+  -o ./preview-10s.mp4
+```
+
+Defaults optimized for fast local iteration:
+- `--model tiny`
+- `--device cpu`
+- `--compute-type int8`
+- output `1280x720` at `30fps`
+
+The script lives at:
+- `scripts/quick-preview.sh`
+
 ## LRC format
 
 Use timestamped lines:
