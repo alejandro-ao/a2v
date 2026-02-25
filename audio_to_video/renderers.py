@@ -191,7 +191,7 @@ class KineticLyricsRenderer(BaseRenderer):
         )
         self.measure_canvas = Image.new("RGB", (32, 32))
         self.measure_draw = ImageDraw.Draw(self.measure_canvas)
-        self.layout_cache: dict[str, list[list[tuple[str, int, int, int]]]] = {}
+        self.layout_cache: dict[str, list[list[tuple[str, int, int]]]] = {}
         self.font_main = load_font(74, self.font_path)
         self.font_small = load_font(40, self.font_path)
 
@@ -237,51 +237,30 @@ class KineticLyricsRenderer(BaseRenderer):
         layout = self._layout_words(words)
         line_height = int(getattr(self.font_main, "size", 48) * 1.3)
         y_base = int(self.config.height * 0.34)
+        active_word_idx = self._active_word_index(progresses)
 
         for row_idx, row in enumerate(layout):
             total_w = 0
-            for j, (_, _, width, _) in enumerate(row):
+            for j, (_, _, width) in enumerate(row):
                 total_w += width
                 if j != len(row) - 1:
                     total_w += self.space_w
 
             x = (self.config.width - total_w) // 2
             y = y_base + (row_idx * line_height)
-            for word, word_idx, width, height in row:
+            for word, word_idx, width in row:
                 text_color = (214, 222, 238, 185)
-                word_progress = progresses[word_idx]
-
-                if word_progress >= 1.0:
-                    text_color = (255, 246, 218, 255)
-                elif word_progress > 0.0:
-                    pad_x = 12
-                    pad_y = 8
-                    left = x - pad_x
-                    top = y - pad_y
-                    right = x + width + pad_x
-                    bottom = y + height + pad_y
-                    radius = int((height + (2 * pad_y)) * 0.42)
-
-                    draw.rounded_rectangle(
-                        (left, top, right, bottom),
-                        radius=radius,
-                        fill=(255, 190, 132, 54),
-                    )
-
-                    fill_right = left + int((right - left) * float(np.clip(word_progress, 0.0, 1.0)))
-                    if fill_right > left + 2:
-                        draw.rounded_rectangle(
-                            (left, top, fill_right, bottom),
-                            radius=radius,
-                            fill=(255, 170, 96, 125),
-                        )
-                    text_color = (255, 248, 232, 255)
+                if active_word_idx is not None and word_idx == active_word_idx:
+                    progress = progresses[word_idx]
+                    pulse = float(np.sin(np.pi * progress))
+                    highlight = int(190 + (40 * pulse))
+                    text_color = (255, highlight, 148, 255)
 
                 draw.text((x + 2, y + 3), word, font=self.font_main, fill=(0, 0, 0, 120))
                 draw.text((x, y), word, font=self.font_main, fill=text_color)
                 x += width + self.space_w
 
-    def _layout_words(self, words: list[str]) -> list[list[tuple[str, int, int, int]]]:
+    def _layout_words(self, words: list[str]) -> list[list[tuple[str, int, int]]]:
         cache_key = "|||".join(words)
         cached = self.layout_cache.get(cache_key)
         if cached is not None:
@@ -290,23 +269,23 @@ class KineticLyricsRenderer(BaseRenderer):
         max_width = int(self.config.width * 0.86)
         self.space_w = self._text_width(" ", self.font_main)
 
-        rows: list[list[tuple[str, int, int, int]]] = []
-        row: list[tuple[str, int, int, int]] = []
+        rows: list[list[tuple[str, int, int]]] = []
+        row: list[tuple[str, int, int]] = []
         row_w = 0
 
         for idx, word in enumerate(words):
-            word_w, word_h = self._text_size(word, self.font_main)
+            word_w = self._text_width(word, self.font_main)
             required = word_w if not row else row_w + self.space_w + word_w
             if row and required > max_width:
                 rows.append(row)
-                row = [(word, idx, word_w, word_h)]
+                row = [(word, idx, word_w)]
                 row_w = word_w
             else:
                 if row:
                     row_w += self.space_w + word_w
                 else:
                     row_w = word_w
-                row.append((word, idx, word_w, word_h))
+                row.append((word, idx, word_w))
 
         if row:
             rows.append(row)
@@ -332,13 +311,15 @@ class KineticLyricsRenderer(BaseRenderer):
         progresses = [float(np.clip(highlight - i, 0.0, 1.0)) for i in range(len(words))]
         return words, progresses
 
+    def _active_word_index(self, progresses: list[float]) -> int | None:
+        for idx, progress in enumerate(progresses):
+            if 0.0 < progress < 1.0:
+                return idx
+        return None
+
     def _text_width(self, text: str, font: ImageFont.ImageFont) -> int:
         bbox = self.measure_draw.textbbox((0, 0), text, font=font)
         return int(bbox[2] - bbox[0])
-
-    def _text_size(self, text: str, font: ImageFont.ImageFont) -> tuple[int, int]:
-        bbox = self.measure_draw.textbbox((0, 0), text, font=font)
-        return int(bbox[2] - bbox[0]), int(bbox[3] - bbox[1])
 
     def _wave_points(self, t: float) -> np.ndarray:
         chunk = segment_around_time(
